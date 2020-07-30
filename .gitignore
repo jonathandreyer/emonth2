@@ -1,7 +1,6 @@
-.pioenvs
+.pio
 .clang_complete
 .gcc-flags.json
-.piolibdeps
 *~
 # Ignore list for Eagle, a PCB layout tool
 # Backup files
