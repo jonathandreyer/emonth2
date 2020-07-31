@@ -30,6 +30,7 @@
   31	- Special allocation in JeeLib RFM12 driver - Node31 can communicate with nodes on any network group
   -------------------------------------------------------------------------------------------------------------
   Change log:
+  V3.2.7   - (08/10/22) Enable blink led & remove unnecessary variable
   V3.2.6   - [30/9/21 - RW] Multiple external DS18B20 sensors accepted. No change to config file.
   V3.2.5   - [30/1/21 - RW] Factory test transmission moved to Grp 1 to avoid interference with recorded data at power-up.
                             Missing declaration of showString( ) added.
@@ -71,9 +72,9 @@
 #define NUM_EXTERNAL_TEMP_SENSORS 1                                    // Specify number of external temperature sensors that are connected.
                                                
 boolean debug=1;                                                       // Set to 1 to few debug serial output
-boolean flash_led=0;                                                   // Flash LED after each sample (battery drain) default=0
+boolean flash_led=1;                                                   // Flash LED after each sample (battery drain) default=0
 
-const unsigned int  version = 326 ;                                     // firmware version
+const unsigned int  version = 327;                                     // firmware version
 // These variables control the transmit timing of the emonTH
 const unsigned long WDT_PERIOD = 80;                                   // mseconds.
 const unsigned long WDT_MAX_NUMBER = 690;                              // Data sent after WDT_MAX_NUMBER periods of WDT_PERIOD ms without pulses:
@@ -146,7 +147,7 @@ volatile unsigned long pulseCount;
 unsigned long WDT_number;
 boolean  p;
 
-unsigned long now, start;
+unsigned long start;
 const byte SLAVE_ADDRESS = 42;
 
 const char helpText1[] PROGMEM =                                       // Available Serial Commands
@@ -491,9 +492,6 @@ void loop()
       delay(5);
     } // end serial print debug
 
-
-    unsigned long last = now;
-    now = millis();
     WDT_number=0;
   } // end WDT
 
