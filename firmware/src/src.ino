@@ -1,5 +1,6 @@
 /*
   emonTH V2 Low Power SI7021 Humidity & Temperature, DS18B20 Temperature & Pulse counting Node Example
+  - Using RFM69 LowPowerLabs format & emonEProm library
 
   Si7021 = internal temperature & Humidity
   DS18B20 = External temperature
@@ -29,17 +30,21 @@
   17-30	- Environmental sensing nodes (temperature humidity etc.)
   31	- Special allocation in JeeLib RFM12 driver - Node31 can communicate with nodes on any network group
   -------------------------------------------------------------------------------------------------------------
+  */
+
+const char *firmware_version = {"5.0.0\n\r"};
+/*
+
   Change log:
-  V3.2.7   - (08/10/22) Enable blink led & remove unnecessary variable
-  V3.2.6   - [30/9/21 - RW] Multiple external DS18B20 sensors accepted. No change to config file.
-  V3.2.5   - [30/1/21 - RW] Factory test transmission moved to Grp 1 to avoid interference with recorded data at power-up.
-                            Missing declaration of showString( ) added.
+  V5.0.0   - (18/11/22) Replace RFM69 "Native" packet format with RFM69 LowPowerLabs format 
+  V4.0.0   - (10/07/21) Replace JeeLib with OEM RFM69nTxLib using RFM69 "Native" packet format, add emonEProm library support
+  
   V3.2.4   - (25/05/18) Add prompt for serial config
   V3.2.3   - (17/07/17) Fix DIP switch had no effect
   V3.2.2   - (12/05/17) Fix DIP switch nodeID not being read when EEPROM is configures
   V3.2.1   - (30/11/16) Fix emonTx port typo
   V3.2.0   - (13/11/16) Run-time serial nodeID config
-  V3.1.0   - (19/10/16) Test for RFM69CW and SI7021 at startup, allow serial use without RF present
+  V3.1.0   - (19/10/16) Test for RFM69CW and SI7021 at startup, allow serial use without RF prescent
   V3.0.0   - (xx/10/16) Add support for SI7021 sensor instead of DHT22 (emonTH V2.0 hardware)
   ^^^ emonTH V2.0 hardware ^^^
   V2.7   - (15/09/16) Serial print serial pairs for emonesp compatiable e.g. temp:210,humidity:56
@@ -51,12 +56,9 @@
   v2.2   - 60s RF transmit period now uses timer1, pulse events are decoupled from RF transmit
   v2.4   - 5 min default transmisson time = 300 ms
   v2.1   - Branched from emonTH_DHT22_DS18B20 example, first version of pulse counting version
--------------------------------------------------------------------------------------------------------------
+ -------------------------------------------------------------------------------------------------------------
   emonhub.conf node decoder:
   See: https://github.com/openenergymonitor/emonhub/blob/emon-pi/configuration.md
-  NOTE: If the number of external temperature sensors is changed from 1, the 4 lines below:  'names =  ...',
-  'datacodes = ...', 'scales = ...' & 'units = ...' must be changed to suit.
-  The maximum recommended is 4.
 
     [[23]]
       nodename = emonTH_5
@@ -69,104 +71,117 @@
          units = C,C,%,V,p
   */
 // -------------------------------------------------------------------------------------------------------------
-#define NUM_EXTERNAL_TEMP_SENSORS 1                                    // Specify number of external temperature sensors that are connected.
-                                               
-boolean debug=1;                                                       // Set to 1 to few debug serial output
-boolean flash_led=1;                                                   // Flash LED after each sample (battery drain) default=0
 
-const unsigned int  version = 327;                                     // firmware version
+bool flash_led = false;                                                // true = Flash LED after each sample (increases battery drain)
+
 // These variables control the transmit timing of the emonTH
 const unsigned long WDT_PERIOD = 80;                                   // mseconds.
 const unsigned long WDT_MAX_NUMBER = 690;                              // Data sent after WDT_MAX_NUMBER periods of WDT_PERIOD ms without pulses:
-                                                                       // 690x 80 = 55.2 seconds (it needs to be about 5s less than the record interval in emoncms)
-const  unsigned long PULSE_MAX_NUMBER = 100;                           // Data sent after PULSE_MAX_NUMBER pulses
-const  unsigned long PULSE_MAX_DURATION = 50;
-
-
-#define RF69_COMPAT 1                                                  // Set to 1 if using RFM69CW or 0 is using RFM12B
-#define FACTORYTESTGROUP 1                                             // R.F. Group for factory test only
-#include <JeeLib.h>                                                    // https://github.com/jcw/jeelib
-#include <RF69_avr.h>
-#define REG_SYNCVALUE1      0x2F
-boolean RF_STATUS;
-
-
-byte RF_freq=RF12_433MHZ;                                              // Frequency of RF12B module can be RF12_433MHZ, RF12_868MHZ or RF12_915MHZ. You should use the one matching the module you have.
-byte nodeID = 23;                                                      // EmonTH temperature RFM12B node ID - should be unique on network
-int networkGroup = 210;                                                // EmonTH RFM12B wireless network group - needs to be same as emonBase and emonGLCD
-                                                                       // DS18B20 resolution 9,10,11 or 12bit corresponding to (0.5, 0.25, 0.125, 0.0625 degrees C LSB),
-                                                                       // lower resolution means lower power
-
-const int TEMPERATURE_PRECISION=11;                                    // 9 (93.8ms),10 (187.5ms) ,11 (375ms) or 12 (750ms) bits equal to resplution of 0.5C, 0.25C, 0.125C and 0.0625C
-#define ASYNC_DELAY 375                                                // 9bit requres 95ms, 10bit 187ms, 11bit 375ms and 12bit resolution takes 750ms
-// See block comment above for library info
+                                                                       // 690 × 80 = 55.2 seconds (it needs to be about 5s less than the record interval in emoncms)
+const unsigned long PULSE_MAX_NUMBER = 100;                            // Data sent after PULSE_MAX_NUMBER pulses
+#define RFM69CW                                                        // Use the RFM69CW radio
+#include <RFM69.h>                                                     // RFM69 LowPowerLabs radio library
+#include <emonEProm.h>                                                 // OEM EEPROM library
+#include <JeeLib.h>
 #include <avr/power.h>
 #include <avr/sleep.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
-ISR(WDT_vect) { Sleepy::watchdogEvent(); }                             // Attached JeeLib sleep function to Atmega328 watchdog -enables MCU to be put into sleep mode inbetween readings to reduce power consumption
+// Include EmonTH_V2_LPL_config.ino in the same directory as this for configuration functions & data
+
+
+#define REG_SYNCVALUE1 0x2F
+#define MAX_SENSORS 4                                                  // The maximum number of external temperature sensors.
+                                                                       // (Only the first will be sent by radio without further changes.)
+                                                                       
+#define FACTORYTESTGROUP 1                                             // Transmit the Factory Test on Grp 1 
+                                                                       //   to avoid interference with recorded data at power-up.
+
+//---------------------------- emonTH Settings - Stored in EEPROM and shared with config.ino ------------------------------------------------
+struct 
+{
+  byte RF_freq = RF69_433MHZ;                                          // Frequency of radio module can be RFM_433MHZ, RFM_868MHZ or RFM_915MHZ. 
+  byte networkGroup = 210;                                             // Wireless network group, must be the same as emonBase / emonPi and emonGLCD. OEM default is 210
+  byte  nodeID = 23;                                                   // Node ID for this sensor.
+  byte  rf_on = 1;                                                     // RF/Serial output. Bit 0 set: RF on, bit 1 set: serial on.
+  byte  rfPower = 25;                                                  // 0 - 31 = -18 dBm (min value) - +13 dBm (max value). RFM12B equivalent: 25 (+7 dBm)
+                                                                       //    lower power means increased battery life
+  bool  pulse_enable = true;                                           // Pulse counting
+  int   pulse_period = 50;                                             // Pulse min period - 0 = no de-bounce
+  bool  temperatureEnabled = true;                                     // Enable external temperature measurement
+  DeviceAddress allAddresses[MAX_SENSORS];                             // External sensor address data
+} EEProm;
+
+uint16_t eepromSig = 0xFF06;                                           // 'Experimental' signature - see oemEProm Library documentation for details.
+bool calibration_enable = false;                                       // Start with calibration disabled
+byte nodeID = EEProm.nodeID;
+const int busyThreshold = -97;                                         // Signal level below which the radio channel is clear to transmit
+const byte busyTimeout = 0;                                            // Time in ms to wait for the channel to become clear, before transmitting anyway. Set to zero to
+                                                                       //   inhibit channel occupancy check (conserves battery life but increases the risk of lost messages)
+                                                                       //   Recommended value when used: 15 (ms)
+
+
+RFM69 radio;
+
+const int TEMPERATURE_PRECISION = 11;                                  // DS18B20 resolution 9,10,11 or 12bit corresponding to (0.5, 0.25, 0.125, 0.0625 degrees C LSB),
+                                                                       // lower resolution means lower power
+                                                                       // 9 (93.8ms), 10 (187.5ms), 11 (375ms) or 12 (750ms) bits equal to resolution of 0.5C, 0.25C, 0.125C and 0.0625C
+#define ASYNC_DELAY 375                                                // 9bit requires 95ms, 10bit 187ms, 11bit 375ms and 12bit resolution takes 750ms
+// See block comment above for library info
+ISR(WDT_vect) { Sleepy::watchdogEvent(); }                             // Attach JeeLib sleep function to Atmega328 watchdog - enables MCU to be put into sleep mode inbetween readings to reduce power consumption
 
 // SI7021_status SPI temperature & humidity sensor
 #include <Wire.h>
 #include <SI7021.h>
 SI7021 SI7021_sensor;
-boolean SI7021_status;
+bool SI7021_status;
 
 // Hardwired emonTH pin allocations
-const byte DS18B20_PWR=    5;
-const byte LED=            9;
-const byte BATT_ADC=       1;
-const byte DIP_switch1=    7;
-const byte DIP_switch2=    8;
-const byte pulse_countINT= 1;                                          // INT 1 / Dig 3 Screw Terminal Block Number 4
-const byte pulse_count_pin=3;                                          // INT 1 / Dig 3 Screw Terminal Block Number 4
+const byte DS18B20_PWR =    5;
+const byte LED =            9;
+const byte BATT_ADC =       1;
+const byte DIP_switch1 =    7;
+const byte DIP_switch2 =    8;
+const byte pulse_count_pin =3;                                         // INT 1 / Dig 3 Screw Terminal Block Number 4
 #define ONE_WIRE_BUS       17
-const byte DHT22_PWR=       6;                                         // Not used in emonTH V2.0, 10K resistor R1 connects DHT22 pins
-const byte DHT22_DATA=      16;                                        // Not used in emonTH V2.0, 10K resistor R1 connects DHT22 pins.
+const byte DHT22_PWR =      6;                                         // Not used in emonTH V2.0, 10K resistor R1 connects DHT22 pins
+const byte DHT22_DATA =    16;                                         // Not used in emonTH V2.0, 10K resistor R1 connects DHT22 pins.
+
+bool dip1;                                                             // DIP switch state
+bool dip2;                                                             // DIP switch state
 
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
-boolean DS18B20;                                                       // create flag variable to store presence of DS18B20
 
 // Note: Please update emonhub configuration guide on OEM wide packet structure change:
 // https://github.com/openenergymonitor/emonhub/blob/emon-pi/configuration.md
-typedef struct {                                                       // RFM RF payload datastructure
+typedef struct 
+{                                                                      // RFM RF payload datastructure
   int temp;
-  int temp_external[NUM_EXTERNAL_TEMP_SENSORS];
+  int temp_external;
   int humidity;
   int battery;
   unsigned long pulsecount;
 } Payload;
 Payload emonth;
 
-int numSensors;
-//addresses of sensors
-byte allAddress [NUM_EXTERNAL_TEMP_SENSORS][8];                                                // 8 bytes per address
+int numSensors;                                                        // The number of external DS18B20 sensors found
 
 volatile unsigned long pulseCount;
 unsigned long WDT_number;
-boolean  p;
+bool newPulse;
 
-unsigned long start;
+unsigned long now, start;
 const byte SLAVE_ADDRESS = 42;
 
-const char helpText1[] PROGMEM =                                       // Available Serial Commands
-"\n"
-"Available commands:\n"
-"  <nn> i     - set node IDs (standard node ids are 1..30)\n"
-"  <n> b      - set MHz band (4 = 433, 8 = 868, 9 = 915)\n"
-"  <nnn> g    - set network group (RFM12 only allows 212, 0 = any)\n"
-"  s          - save config to EEPROM\n"
-"  v          - Show firmware version\n"
-;
 
-static void showString(PGM_P s);
+static void showString (PGM_P s);
 
 //################################################################################################################################
 //################################################################################################################################
 #ifndef UNIT_TEST // IMPORTANT LINE! // http://docs.platformio.org/en/stable/plus/unit-testing.html
 
-void setup()
+void setup() 
 {
 //################################################################################################################################
 
@@ -185,70 +200,42 @@ void setup()
   //READ DIP SWITCH POSITIONS - LOW when switched on (default off - pulled up high)
   pinMode(DIP_switch1, INPUT_PULLUP);
   pinMode(DIP_switch2, INPUT_PULLUP);
-  boolean DIP1 = digitalRead(DIP_switch1);
-  boolean DIP2 = digitalRead(DIP_switch2);
+  dip1 = digitalRead(DIP_switch1);
+  dip2 = digitalRead(DIP_switch2);
 
+  Serial.begin(115200);
+  Serial.println("OpenEnergyMonitor.org");
+  Serial.print("emonTH FW: V"); Serial.write(firmware_version);
+  delay(100);
 
-  if (debug==1)
+  load_config(true);                                                   // Load RF config from EEPROM (if any exists)
+  
+  if (EEProm.rf_on)
   {
-    Serial.begin(115200);
-    Serial.println("OpenEnergyMonitor.org");
-    Serial.print("emonTH FW: V"); Serial.println(version);
-    delay(100);
-  }
+    list_calibration();
+    
+#ifdef RFM69CW
+    Serial.println("Init RFM...");
+    radio.initialize(RF69_433MHZ,nodeID,EEProm.networkGroup);  
+    radio.encrypt("89txbe4p8aik5kt3");                                                      // initialize RFM
+    Serial.print("rfPower: ");
+    Serial.println(EEProm.rfPower);
+    radio.setPowerLevel(EEProm.rfPower);
+#endif
 
-  // Test for RFM69CW and int with test sequence if found
-  // spiInit();
-  //writeReg(REG_SYNCVALUE1, 0xAA);
-  // int result = readReg(REG_SYNCVALUE1); //CAUSED RFM TO HANG
-  // writeReg(REG_SYNCVALUE1, 0x55);
-   //result = result + readReg(REG_SYNCVALUE1);
-  // readReg(REG_SYNCVALUE1);
-  // if (result!=0){  // result will be > 0 if RFM69CW is found
-    // RF_STATUS = 1;
-  // } else {
-    // if (debug) Serial.println("RFM NOT Detected");
-    // RF_STATUS =0;
-  // }
-  RF_STATUS=1;
+    Serial.println("RFM Started");
 
-  if (RF_STATUS==1)
-  {
-    load_config();                                                     // Load RF config from EEPROM (if any exist)
-
-    // Add effect of DIP switch positions to nodeID
-    if ((DIP1 == HIGH) && (DIP2 == HIGH)) nodeID=nodeID;
-    if ((DIP1 == LOW) && (DIP2 == HIGH)) nodeID=nodeID+1;
-    if ((DIP1 == HIGH) && (DIP2 == LOW)) nodeID=nodeID+2;
-    if ((DIP1 == LOW) && (DIP2 == LOW)) nodeID=nodeID+3;
-
-    if (debug) Serial.println("Int RFM...");
-    rf12_initialize(nodeID, RF_freq, FACTORYTESTGROUP);                // Initialize RFM with Factory Test
-   // Send RFM69CW test sequence (for factory testing)
-    for (int i=10; i>-1; i--)
+    // Send RFM69CW test sequence (for factory testing)
+    for (int i = 10; i> -1; i--)
     {
       emonth.temp=i;
-      rf12_sendNow(0, &emonth, sizeof emonth);
+      // rfm_send((byte *)&emonth, sizeof(emonth), FACTORYTESTGROUP, nodeID, EEProm.RF_freq, EEProm.rfPower, busyThreshold, busyTimeout);
+      radio.send(5, (const void*)(&emonth), sizeof(emonth));
       delay(100);
     }
-    rf12_sendWait(2);
-    emonth.temp=0;
+    radio.sleep();
+    emonth.temp = 0;
     // end of factory test sequence
- 
-    if (debug)
-    {
-      Serial.println("RFM Started");
-      Serial.print("Node: ");
-      Serial.print(nodeID);
-      Serial.print(" Freq: ");
-      if (RF_freq == RF12_433MHZ) Serial.print("433MHz");
-      if (RF_freq == RF12_868MHZ) Serial.print("868MHz");
-      if (RF_freq == RF12_915MHZ) Serial.print("915MHz");
-      Serial.print(" Network: ");
-      Serial.println(networkGroup);
-    }
-   rf12_initialize(nodeID, RF_freq, networkGroup);                     // Re-Initialize RFM with 'normal' Group
-   rf12_sleep(RF12_SLEEP);
   }
 
   pinMode(DS18B20_PWR,OUTPUT);
@@ -258,119 +245,100 @@ void setup()
   //################################################################################################################################
   // Setup and for presence of si7021
   //################################################################################################################################
-  if (debug==1) Serial.println("Int SI7021..");
+  Serial.println("Int SI7021..");
 
   // check if the I2C lines are HIGH
   if (digitalRead(SDA) == HIGH || digitalRead(SCL) == HIGH)
   {
     SI7021_sensor.begin();
     int deviceid = SI7021_sensor.getDeviceId();
-    if (deviceid!=0)
+    if (deviceid!=0) 
     {
       SI7021_status=1;
-      if (debug){
-        si7021_env data = SI7021_sensor.getHumidityAndTemperature();
-        Serial.print("SI7021 Started, ID: ");
-        Serial.println(deviceid);
-        Serial.print("SI7021 t: "); Serial.println(data.celsiusHundredths/100.0);
-        Serial.print("SI7021 h: "); Serial.println(data.humidityBasisPoints/100.0);
-      }
+      si7021_env data = SI7021_sensor.getHumidityAndTemperature();
+      Serial.print("SI7021 Started, ID: ");
+      Serial.println(deviceid);
+      Serial.print("SI7021 t: "); Serial.println(data.celsiusHundredths/100.0);
+      Serial.print("SI7021 h: "); Serial.println(data.humidityBasisPoints/100.0);
     }
-    else
+    else 
     {
       SI7021_status=0;
-      if (debug) Serial.println("SI7021 Error");
+      Serial.println("SI7021 Error");
     }
   }
   else
-  {
-    SI7021_status=0;
-    if (debug) Serial.println("SI7021 Error");
-  }
+    Serial.println("SI7021 Error");
+
   //################################################################################################################################
   // Setup and for presence of DS18B20
   //################################################################################################################################
   digitalWrite(DS18B20_PWR, HIGH); delay(50);
   sensors.begin();
-  sensors.setWaitForConversion(false);                             //disable automatic temperature conversion to reduce time spent awake, conversion will be implemented manually in sleeping http://harizanov.com/2013/07/optimizing-ds18b20-code-for-low-power-applications/
-  numSensors=(sensors.getDeviceCount());
-  byte j=0;                                        // search for one wire devices and
-                                                   // copy to device address arrays.
-  while ((j < numSensors) && (oneWire.search(allAddress[j])))  j++;
-  digitalWrite(DS18B20_PWR, LOW);
+  sensors.setWaitForConversion(false);                                 // disable automatic temperature conversion to reduce time spent awake, 
+                                                                       // conversion will be implemented manually in sleeping 
+                                                                       // http://harizanov.com/2013/07/optimizing-ds18b20-code-for-low-power-applications/
 
-  if (numSensors==0)
+  if (EEProm.allAddresses[0][0] == 0x00)                               // No sensor addresses recorded in EEPROM
   {
-    if (debug==1) Serial.println("No DS18B20");
-    DS18B20=0;
+    numSensors = (sensors.getDeviceCount()); 
+    if (numSensors > MAX_SENSORS)
+      numSensors = MAX_SENSORS;
   }
   else
   {
-    DS18B20=1;
-    if (debug==1)
+    numSensors = MAX_SENSORS;
+    for (numSensors = MAX_SENSORS; numSensors > 0; numSensors--)
     {
-      Serial.print(numSensors); Serial.println(" DS18B20");
+      if (EEProm.allAddresses[numSensors-1][0] == 0x28)                // 0x28 = signature of a DS18B20, so a pre-existing sensor
+          break;
     }
   }
-  if (debug==1) delay(100);
+  byte j=0;                                                            // search for one wire devices and copy to device address array.
+  if (EEProm.allAddresses[0][0] != 0x28)                               // 0x28 = signature of a DS18B20, so a pre-existing array - do not search for sensors
+    while ((j < numSensors) && (oneWire.search(EEProm.allAddresses[j]))) 
+      j++;
+
+  digitalWrite(DS18B20_PWR, LOW);
+
+  if (numSensors) 
+  {
+    Serial.print(numSensors); 
+    Serial.println(" DS18B20");
+  }
+  else
+    Serial.println("No DS18B20");
+  Serial.println("");
 
 
+
+  //################################################################################################################################
+  // Config mode
+  //################################################################################################################################
+
+  getSettings();
+  
   //################################################################################################################################
   // Interrupt pulse counting setup
   //################################################################################################################################
-  emonth.pulsecount = 0;
-  pulseCount = 0;
-  WDT_number=720;
-  p = 0;
-  attachInterrupt(pulse_countINT, onPulse, RISING);
 
-  //################################################################################################################################
-  // RF Config mode
-  //################################################################################################################################
-  if (RF_STATUS==1)
-  {
-    Serial.println("");
-    Serial.println("'+++' then [Enter] for RF config mode");
-    Serial.println("(Arduino IDE Serial Monitor: make sure 'Both NL & CR' is selected)");
-    Serial.println("waiting 5s...");
-    start = millis();
-    while (millis() < (start + 5000))
-    {
-      // If serial input of keyword string '+++' is entered during 5s power-up then enter config mode
-      if (Serial.available())
-      {
-        if ( Serial.readString() == "+++\r\n")
-        {
-          Serial.println("Entering config mode...");
-          showString(helpText1);
-          // char c[]="v"
-          config(char('v'));
-          while(1)
-          {
-            if (Serial.available())
-            {
-              config(Serial.read());
-            }
-          }
-        }
-      }
-    }
-  }
-
+  startPulseCount();
+  
+  
   //################################################################################################################################
   // Power Save  - turn off what we don't need - http://www.nongnu.org/avr-libc/user-manual/group__avr__power.html
   //################################################################################################################################
-  ACSR |= (1 << ACD);                     // disable Analog comparator
-  if (debug==0) power_usart0_disable();   //disable serial UART
-  power_twi_disable();                    //Two Wire Interface module:
+  ACSR |= (1 << ACD);                                                  // disable Analog comparator
+  if (!(EEProm.rf_on & 0x02)) power_usart0_disable();                  // disable serial UART
+  power_twi_disable();                                                 // Two Wire Interface module:
   power_spi_disable();
   power_timer1_disable();
-  // power_timer0_disable();              //don't disable necessary for the DS18B20 library
+  // power_timer0_disable();                                           //don't disable necessary for the DS18B20 library
 
-  // Only turn off LED if both sensor and RF69CW are working
-  if ((RF_STATUS) && (SI7021_status))
+  // Only turn off LED if sensor is working
+  if (SI7021_status)
   {
-    digitalWrite(LED,LOW);                  // turn off LED to indciate end setup
+    digitalWrite(LED,LOW);                                             // turn off LED to indicate end setup
   }
 } // end of setup
 
@@ -380,11 +348,9 @@ void setup()
 void loop()
 //################################################################################################################################
 {
-
-  if (p)
-  {
-    Sleepy::loseSomeTime(PULSE_MAX_DURATION);
-    p=0;
+  if (newPulse) {
+    Sleepy::loseSomeTime(EEProm.pulse_period);
+    newPulse = false;
   }
 
   if (Sleepy::loseSomeTime(WDT_PERIOD)==1) {
@@ -393,28 +359,28 @@ void loop()
 
   if (WDT_number>=WDT_MAX_NUMBER || pulseCount>=PULSE_MAX_NUMBER)
   {
-    cli();
-    emonth.pulsecount += (unsigned int) pulseCount;
-    pulseCount = 0;
-    sei();
+    if (EEProm.pulse_enable)
+    {
+      cli();
+      emonth.pulsecount += pulseCount;
+      pulseCount = 0;
+      sei();
+    }
 
 
-    if (DS18B20==1)
+    if (numSensors && EEProm.temperatureEnabled)
     {
       digitalWrite(DS18B20_PWR, HIGH); dodelay(50);
-      for(int j=0;j<numSensors;j++) sensors.setResolution(allAddress[j], TEMPERATURE_PRECISION);      // and set the a to d conversion resolution of each.
+      for(int j=0;j<numSensors;j++) 
+        sensors.setResolution(EEProm.allAddresses[j], TEMPERATURE_PRECISION);      // and set the a to d conversion resolution of each.
       sensors.requestTemperatures();                                   // Send the command to get temperatures
-      dodelay(ASYNC_DELAY); //Must wait for conversion, since we use ASYNC mode
-
-      for(int j=0; j<NUM_EXTERNAL_TEMP_SENSORS;j++)
-      {
-        float temp=(sensors.getTempC(allAddress[j]));
-        if ((temp<125.0) && (temp>-40.0))
-        {
-          emonth.temp_external[j]=(temp*10);
-        }
-      }
+      dodelay(ASYNC_DELAY);                                            //Must wait for conversion, since we use ASYNC mode
+      float temp=(sensors.getTempC(EEProm.allAddresses[0]));
       digitalWrite(DS18B20_PWR, LOW);
+      if ((temp < 125.0) && (temp > -40.0))
+      {
+        emonth.temp_external = (temp*10);
+      }
     }
 
     emonth.battery=int(analogRead(BATT_ADC)*0.0322);                   //read battery voltage, convert ADC to volts x10
@@ -442,16 +408,13 @@ void loop()
 
 
     // Send data via RF
-    if (RF_STATUS)
+    if (EEProm.rf_on & 0x01)
     {
       power_spi_enable();
-      rf12_sleep(RF12_WAKEUP);
       dodelay(30);                                                     // wait for module to wakup
-      rf12_sendNow(0, &emonth, sizeof emonth);
-      // set the sync mode to 2 if the fuses are still the Arduino default
-      // mode 3 (full powerdown) can only be used with 258 CK startup fuses
-      rf12_sendWait(2);
-      rf12_sleep(RF12_SLEEP);
+      // rfm_send((byte *)&emonth, sizeof(emonth), EEProm.networkGroup, nodeID, EEProm.RF_freq, EEProm.rfPower, busyThreshold, busyTimeout);
+      radio.send(5, (const void*)(&emonth), sizeof(emonth));
+      radio.sleep();
       dodelay(100);
       power_spi_disable();
     }
@@ -464,18 +427,15 @@ void loop()
     }
 
 
-    if (debug==1)
-    // Serial print strings pairs e.g. "temp:2634,humidity:4010,batt:33"
-    // Works with EmonESP direct serial
+    if (EEProm.rf_on & 0x02)
     {
+      // Serial print strings pairs e.g. "temp:2634,humidity:4010,batt:33"
+      // Works with EmonESP direct serial
       Serial.print("temp:");Serial.print(emonth.temp); Serial.print(",");
 
-      if (DS18B20)
+      if (numSensors)
       {
-        for(int j=0;j<NUM_EXTERNAL_TEMP_SENSORS;j++)
-        {
-          Serial.print("tempex");Serial.print(j);Serial.print(":");Serial.print(emonth.temp_external[j]); Serial.print(",");
-        }
+        Serial.print("tempex:");Serial.print(emonth.temp_external); Serial.print(",");
       }
 
       if (SI7021_status)
@@ -483,15 +443,17 @@ void loop()
         Serial.print("humidity:");Serial.print(emonth.humidity); Serial.print(",");
       }
       Serial.print("batt:"); Serial.print(emonth.battery);
-      if (emonth.pulsecount > 0)
+      if (emonth.pulsecount > 0) 
       {
         Serial.print(",");
         Serial.print("pulse:"); Serial.print(emonth.pulsecount);
       }
       Serial.println();
       delay(5);
-    } // end serial print debug
+    } // end serial print
 
+
+    now = millis();
     WDT_number=0;
   } // end WDT
 
@@ -510,22 +472,64 @@ void dodelay(unsigned int ms)
   ADMUX=oldADMUX;
 }
 
+  //################################################################################################################################
+  // Interrupt pulse counting setup
+  //################################################################################################################################
+void startPulseCount(void)
+{
+  emonth.pulsecount = 0;
+  pulseCount = 0;
+  WDT_number=720;
+  newPulse = false;
+  attachInterrupt(digitalPinToInterrupt(pulse_count_pin), onPulse, RISING);
+}
+
+void stopPulseCount(void)
+{
+  detachInterrupt(digitalPinToInterrupt(pulse_count_pin));
+}
+
 // The interrupt routine - runs each time a rising edge of a pulse is detected
 void onPulse()
 {
-  p=1;                                                                 // flag for new pulse set to true
-  pulseCount++;                                                        // number of pulses since the last RF sent
+  newPulse = true;                           // flag for new pulse set to true
+  pulseCount++;                              // number of pulses since the last RF sent
 }
 
-// Used to test for RFM69CW prescence
-static void writeReg (uint8_t addr, uint8_t value) {
-    RF69::control(addr | 0x80, value);
+void printTemperatureSensorAddresses(void)
+{
+  DeviceAddress *temperatureSensors = EEProm.allAddresses;
+  Serial.print(F("Temperature Sensors found = "));
+  Serial.print(numSensors);
+  Serial.print(" of ");
+  Serial.print(MAX_SENSORS);
+  
+  if (numSensors)
+  {
+      Serial.println(F(", with addresses..."));
+      for (int j=0; j< numSensors; j++)
+      {
+          for (int i=0; i<8; i++)
+          {
+              if (temperatureSensors[j][i] < 0x10)
+                Serial.print(F("0"));
+              Serial.print(temperatureSensors[j][i], 16);
+              Serial.print(F(" "));
+          }
+          if (temperatureSensors[j][6] == 0x03)
+            Serial.print(F("Sensor may not be reliable"));
+          Serial.println();
+          delay(5);
+      }
+  }
+  Serial.println();
+  Serial.print(F("Temperature measurement is"));
+  Serial.print(EEProm.temperatureEnabled?"":" NOT");
+  Serial.println(F(" enabled."));
+  Serial.println();
+  delay(5);
+        
 }
-
-static uint8_t readReg (uint8_t addr) {
-    return RF69::control(addr, 0);
-}
-
 
 
 #endif    // IMPORTANT LINE! end unit test
