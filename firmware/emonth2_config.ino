@@ -2,7 +2,6 @@
 Configuration functions for EmonTH_V2_rfm69n.ino
 */
 
-
 #include <Arduino.h>
 #include <avr/pgmspace.h>
 #include <EEPROM.h>
@@ -11,7 +10,7 @@ Configuration functions for EmonTH_V2_rfm69n.ino
 #define ON 0
 
  // Available Serial Commands
-const PROGMEM char helpText[] =                                
+const PROGMEM char helpText[] =
 "\n"
 "Available commands:\n"
 "  l         - list the settings\n"
@@ -36,14 +35,13 @@ const PROGMEM char helpText[] =
 "            - x = a single numeral: the position of the sensor in the list (1-based)\n"
 "            - yy = 8 hexadecimal bytes representing the sensor's address\n"
 "               e.g.  28 81 43 31 07 00 00 D9\n"
-"               N.B. Sensors CANNOT be added.\n"
-;
+"               N.B. Sensors CANNOT be added.\n";
 
 extern DeviceAddress *temperatureSensors;
 
 static void load_config(bool verbose)
 {
-  if (eepromRead(eepromSig, (byte *)&EEProm)) 
+  if (eepromRead(eepromSig, (byte *)&EEProm))
   {
     if (verbose)
       Serial.println(F("Loaded EEPROM config"));
@@ -60,16 +58,16 @@ static void list_calibration(void)
   if ((dip1 == ON) && (dip2 == OFF)) nodeID = (EEProm.nodeID  & 0x3F) + 1;
   if ((dip1 == OFF) && (dip2 == ON)) nodeID = (EEProm.nodeID  & 0x3F) + 2;
   if ((dip1 == ON) && (dip2 == ON))  nodeID = (EEProm.nodeID  & 0x3F) + 3;
-  
+
   Serial.println(F("Settings:"));
   Serial.print(F("Group ")); Serial.print(EEProm.networkGroup);
   Serial.print(F(", Node ")); Serial.print(nodeID);
-  Serial.print(F(", Band ")); 
-  Serial.print(EEProm.RF_freq == RF69_433MHZ ? 433 : 
+  Serial.print(F(", Band "));
+  Serial.print(EEProm.RF_freq == RF69_433MHZ ? 433 :
                EEProm.RF_freq == RF69_868MHZ ? 868 :
                EEProm.RF_freq == RF69_915MHZ ? 915 : 0);
   Serial.println(F(" MHz"));
- 
+
   Serial.print(F("pulses = ")); Serial.println(EEProm.pulse_enable);
   Serial.print(F("pulse period = ")); Serial.println(EEProm.pulse_period);
   Serial.print(F("temp_enable = ")); Serial.println(EEProm.temperatureEnabled);
@@ -90,7 +88,7 @@ static void save_config()
 static void wipe_eeprom()
 {
   Serial.println(F("Resetting..."));
-  eepromHide(eepromSig);   
+  eepromHide(eepromSig);
   Serial.println(F("Sketch will now restart using default config."));
   delay(200);
 }
@@ -100,7 +98,6 @@ void softReset(void)
   asm volatile ("  jmp 0");
 }
 
-
 int getPass(void)
 {
 /*
@@ -109,7 +106,7 @@ int getPass(void)
   char buf[5];
   if (Serial.readBytes(buf, 5) != 5)
     return 0;
-  if  (buf[0] == '+' 
+  if (buf[0] == '+'
     && buf[1] == '+'
     && buf[3] == '\r'
     && buf[4] == '\n')
@@ -128,7 +125,6 @@ int getPass(void)
   return 0;
 }
 
-
 void getSettings(void)
 {
 /*
@@ -136,15 +132,15 @@ void getSettings(void)
  *  see the user instruction above, the comments below or the separate documentation for details
  *
  * Data is expected generally in the format
- * 
+ *
  *  [l] [x] [y] [z]
- * 
+ *
  * where:
  *  [l] = a single letter denoting the variable to adjust
  *  [x] [y] [z] etc are values to be set.
- * 
+ *
  */
- 
+
   Serial.println("'+++' then [Enter] for config mode");
   Serial.println("(Arduino IDE Serial Monitor: make sure 'Both NL & CR' is selected)");
   delay(100);
@@ -154,34 +150,32 @@ void getSettings(void)
   while (millis() < (start + 5000))
   {
     // If serial input of keyword string '+++' is entered during 5s power-up then enter config mode
-
     if (Serial.available())
     {
-      if (!calibration_enable) 
+      if (!calibration_enable)
       {
         static char pass_result;
         if (pass_result = getPass())
         {
           Serial.println(F("Entering Settings mode..."));
-          if (pass_result == 2) 
+          if (pass_result == 2)
             showString(helpText);
         }
       }
     }
   }
 
-  
   while (calibration_enable)
   {
     if (Serial.available())
     {
       char c = Serial.read();
       int k1;
-      double k2; 
+      double k2;
       switch (c) {
         case 'b':  // set band: 4 = 433, 8 = 868, 9 = 915
           EEProm.RF_freq = bandToFreq(Serial.parseInt());
-          Serial.print(EEProm.RF_freq == RF69_433MHZ ? 433 : 
+          Serial.print(EEProm.RF_freq == RF69_433MHZ ? 433 :
                        EEProm.RF_freq == RF69_868MHZ ? 868 :
                        EEProm.RF_freq == RF69_915MHZ ? 915 : 0);
           Serial.println(F(" MHz"));
@@ -191,30 +185,30 @@ void getSettings(void)
           EEProm.networkGroup = Serial.parseInt();
           Serial.print(F("Group ")); Serial.println(EEProm.networkGroup);
           break;
-          
+
         /* case 'i' below */
-          
+
         case 'l':
           list_calibration(); // print the settings & calibration values
           break;
-            
+
         case 'm' :
-          /*  Format expected: m[x] [y]
-           * 
+          /* Format expected: m[x] [y]
+           *
            * where:
            *  [x] = a single numeral: 0 = pulses OFF, 1 = pulses ON,
            *  [y] = an integer for the pulse min period in ms - ignored when x=0
            */
-          k1 = Serial.parseInt(); 
-          k2 = Serial.parseFloat(); 
+          k1 = Serial.parseInt();
+          k2 = Serial.parseFloat();
           while (Serial.available())
-            Serial.read(); 
+            Serial.read();
 
           switch (k1) {
             case 0 : EEProm.pulse_enable = false;
               stopPulseCount();
               break;
-            
+
             case 1 : EEProm.pulse_enable = true;
               EEProm.pulse_period = k2;
               startPulseCount();
@@ -224,32 +218,33 @@ void getSettings(void)
           if (k1)
             {Serial.print(k2);Serial.println(F(" ms"));}
           else
-            Serial.println("off");        
-          break;        
-    
-        case 'i':  
-        case 'n':  //  Set NodeID - range expected: 1 - 60
+            Serial.println("off");
+          break;
+
+        case 'i':
+        case 'n':  // set NodeID - range expected: 1 - 60
           EEProm.nodeID = Serial.parseInt();
           EEProm.nodeID = constrain(EEProm.nodeID, 1, 63);
           Serial.print(F("Node ")); Serial.println(EEProm.nodeID);
           break;
-          
-        case 'p': // set RF power level
+
+        case 'p':  // set RF power level
           EEProm.rfPower = (Serial.parseInt() & 0x1F);
           Serial.print("p = ");Serial.print(EEProm.rfPower - 18);Serial.println(" dBm");
-          break; 
-          
-        case 'r': // restore sketch defaults
+          break;
+
+        case 'r':  // restore sketch defaults
           wipe_eeprom();
           softReset();
           break;
 
-        case 's': // Save to EEPROM. ATMega328p has 1kB  EEPROM
+        case 's':  // save to EEPROM. ATMega328p has 1kB  EEPROM
           save_config();
           break;
 
-        case 't' : // Temperatures
-          /*  Format expected: t[x] [y] [y] ...
+        case 't' : // temperatures
+          /*
+           * Format expected: t[x] [y] [y] ...
            */
           set_temperatures();
           break;
@@ -257,44 +252,45 @@ void getSettings(void)
         case 'v': // print firmware version
           Serial.print(F("EmonTH_V2 V")); Serial.write(firmware_version);
           break;
-        
+
         case 'w' :  // Wireless / Serial - RF Off / On
-          /* Format expected: w[x]
+          /*
+           * Format expected: w[x]
            */
-          EEProm.rf_on = Serial.parseInt(); 
+          EEProm.rf_on = Serial.parseInt();
           Serial.println(EEProm.rf_on & 0x01 ? "RF on":"RF off");
           Serial.println(EEProm.rf_on & 0x02 ? "Serial on":"Serial off");
           break;
-          
+
         case 'x':  // exit and continue
           Serial.println(F("Continuing..."));
           while (Serial.available())
-            Serial.read(); 
+            Serial.read();
           calibration_enable = false;
           delay(10);
           break;
 
-        case '?':  // show Help text        
+        case '?':  // show Help text
           showString(helpText);
           Serial.println(F(" "));
           break;
-        
+
         default:
           ;
       } //end switch
       while (Serial.available())
-        Serial.read(); 
+        Serial.read();
     }
   }
 }
 
-
-static byte bandToFreq (byte band) {
+static byte bandToFreq (byte band)
+{
   return band == 4 ? RF69_433MHZ : band == 8 ? RF69_868MHZ : band == 9 ? RF69_915MHZ : 0;
 }
 
-
-static void showString (PGM_P s) {
+static void showString (PGM_P s)
+{
   for (;;) {
     char c = pgm_read_byte(s++);
     if (c == 0)
@@ -307,21 +303,21 @@ static void showString (PGM_P s) {
 
 void set_temperatures(void)
 {
-  /*  Format expected: t[x] [y] [y] ...
-  * 
-  * where:
-  *  [x] = 0  [y] = single numeral: 0 = temperature measurement OFF, 1 = temperature measurement ON
-  *  [x] = a single numeral > 0: the position of the sensor in the list (1-based)
-  *  [y] = 8 hexadecimal bytes representing the sensor's address
-  *          e.g. t2 28 81 43 31 07 00 00 D9
-  */
-    
+  /* Format expected: t[x] [y] [y] ...
+   *
+   * where:
+   *  [x] = 0  [y] = single numeral: 0 = temperature measurement OFF, 1 = temperature measurement ON
+   *  [x] = a single numeral > 0: the position of the sensor in the list (1-based)
+   *  [y] = 8 hexadecimal bytes representing the sensor's address
+   *          e.g. t2 28 81 43 31 07 00 00 D9
+   */
+
   DeviceAddress sensorAddress;
-         
+
 	unsigned int k1 = Serial.parseInt();
 
   if (k1 == 0)
-     // write to EEPROM
+    // write to EEPROM
     EEProm.temperatureEnabled = Serial.parseInt();
   else if (k1 > sizeof(EEProm.allAddresses) / sizeof(DeviceAddress))
     return;
@@ -330,18 +326,18 @@ void set_temperatures(void)
     byte i = 0, a = 0, b;
     Serial.readBytes(&b,1);     // expect a leading space
     while (Serial.readBytes(&b,1) && i < 8)
-    {            
+    {
       if (b == ' ' || b == '\r' || b == '\n')
       {
         sensorAddress[i++] = a;
         a = 0;
-      }                
+      }
       else
       {
         a *= 16;
         a += c2h(b);
-      }          
-    }     
+      }
+    }
     // set address
     for (byte i=0; i<8; i++)
       EEProm.allAddresses[k1-1][i] = sensorAddress[i];
@@ -350,12 +346,11 @@ void set_temperatures(void)
 
 byte c2h(byte b)
 {
-  if (b > 47 && b < 58) 
+  if (b > 47 && b < 58)
     return b - 48;
-  else if (b > 64 && b < 71) 
+  else if (b > 64 && b < 71)
     return b - 55;
-  else if (b > 96 && b < 103) 
+  else if (b > 96 && b < 103)
     return b - 87;
   return 0;
 }
-

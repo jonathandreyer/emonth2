@@ -31,15 +31,15 @@
   -------------------------------------------------------------------------------------------------------------
   */
 
-const char *firmware_version = {"4.1.2\n\r"};
+const char *firmware_version = {"4.1.3\n\r"};
 /*
-
   Change log:
+  V4.1.3   - (27/02/23) Clean code
   V4.1.2   - (27/02/23) Add option to used custom encrpytion key
   V4.1.1   - (19/02/23) Fix missing frequency initialization
   V4.1.0   - (17/02/23) LowPowerLabs radio format option
   V4.0.0   - (10/07/21) Replace JeeLib with OEM RFM69nTxLib using RFM69 "Native" packet format, add emonEProm library support
-  
+
   V3.2.4   - (25/05/18) Add prompt for serial config
   V3.2.3   - (17/07/17) Fix DIP switch had no effect
   V3.2.2   - (12/05/17) Fix DIP switch nodeID not being read when EEPROM is configures
@@ -70,8 +70,8 @@ const char *firmware_version = {"4.1.2\n\r"};
          datacodes = h,h,h,h,L
          scales = 0.1,0.1,0.1,0.1,1
          units = C,C,%,V,p
+  -------------------------------------------------------------------------------------------------------------
   */
-// -------------------------------------------------------------------------------------------------------------
 
 // #define ATTINY                                                      // Uncomment for attiny
 
@@ -91,16 +91,16 @@ const unsigned long PULSE_MAX_NUMBER = 100;                            // Data s
 #define RFM69CW                                                        // Use the RFM69CW radio
 
 #if RadioFormat == RFM69_LOW_POWER_LABS
-  #include <RFM69.h>                             // RFM69 LowPowerLabs radio library
+#include <RFM69.h>                             // RFM69 LowPowerLabs radio library
 #elif RadioFormat == RFM69_JEELIB_CLASSIC
-  #include <rfmTxLib.h>                          // RFM69 transmit-only library using "JeeLib RFM69 Native" message format
+#include <rfmTxLib.h>                          // RFM69 transmit-only library using "JeeLib RFM69 Native" message format
 #elif RadioFormat == RFM69_JEELIB_NATIVE
-  #include <rfm69nTxLib.h>                       // RFM69 transmit-only library using "JeeLib RFM69 Native" message format
+#include <rfm69nTxLib.h>                       // RFM69 transmit-only library using "JeeLib RFM69 Native" message format
 #endif
 
 #include <emonEProm.h>                                                 // OEM EEPROM library
 #ifndef ATTINY
-  #include <JeeLib.h>
+#include <JeeLib.h>
 #endif
 #include <avr/power.h>
 #include <avr/sleep.h>
@@ -108,20 +108,19 @@ const unsigned long PULSE_MAX_NUMBER = 100;                            // Data s
 #include <DallasTemperature.h>
 // Include EmonTH_V2_config.ino in the same directory as this for configuration functions & data
 
-
 #define REG_SYNCVALUE1 0x2F
 #define MAX_SENSORS 4                                                  // The maximum number of external temperature sensors.
                                                                        // (Only the first will be sent by radio without further changes.)
-                                                                       
-#define EXTERNAL_TEMP_SENSORS 1                                        // Specify number of external temperature sensors that are connected                                                                      
-                                                                       
-#define FACTORYTESTGROUP 1                                             // Transmit the Factory Test on Grp 1 
+
+#define EXTERNAL_TEMP_SENSORS 1                                        // Specify number of external temperature sensors that are connected
+
+#define FACTORYTESTGROUP 1                                             // Transmit the Factory Test on Grp 1
                                                                        //   to avoid interference with recorded data at power-up.
 
 //---------------------------- emonTH Settings - Stored in EEPROM and shared with config.ino ------------------------------------------------
-struct 
+struct
 {
-  byte RF_freq = RF69_433MHZ;                                          // Frequency of radio module can be RF69_433MHZ, RF69_868MHZ or RF69_915MHZ. 
+  byte RF_freq = RF69_433MHZ;                                          // Frequency of radio module can be RF69_433MHZ, RF69_868MHZ or RF69_915MHZ.
   byte networkGroup = 210;                                             // Wireless network group, must be the same as emonBase / emonPi and emonGLCD. OEM default is 210
   byte  nodeID = 23;                                                   // Node ID for this sensor.
   byte  rf_on = 1;                                                     // RF/Serial output. Bit 0 set: RF on, bit 1 set: serial on.
@@ -141,9 +140,8 @@ const byte busyTimeout = 0;                                            // Time i
                                                                        //   inhibit channel occupancy check (conserves battery life but increases the risk of lost messages)
                                                                        //   Recommended value when used: 15 (ms)
 
-
 #if RadioFormat == RFM69_LOW_POWER_LABS
-  RFM69 radio;
+RFM69 radio;
 #endif
 
 const int TEMPERATURE_PRECISION = 11;                                  // DS18B20 resolution 9,10,11 or 12bit corresponding to (0.5, 0.25, 0.125, 0.0625 degrees C LSB),
@@ -151,10 +149,11 @@ const int TEMPERATURE_PRECISION = 11;                                  // DS18B2
                                                                        // 9 (93.8ms), 10 (187.5ms), 11 (375ms) or 12 (750ms) bits equal to resolution of 0.5C, 0.25C, 0.125C and 0.0625C
 #define ASYNC_DELAY 375                                                // 9bit requires 95ms, 10bit 187ms, 11bit 375ms and 12bit resolution takes 750ms
 // See block comment above for library info
-ISR(WDT_vect) { 
-  #ifndef ATTINY
-  Sleepy::watchdogEvent(); 
-  #endif
+ISR(WDT_vect)
+{
+#ifndef ATTINY
+  Sleepy::watchdogEvent();
+#endif
 }                             // Attach JeeLib sleep function to Atmega328 watchdog - enables MCU to be put into sleep mode inbetween readings to reduce power consumption
 
 // SI7021_status SPI temperature & humidity sensor
@@ -182,7 +181,7 @@ DallasTemperature sensors(&oneWire);
 
 // Note: Please update emonhub configuration guide on OEM wide packet structure change:
 // https://github.com/openenergymonitor/emonhub/blob/emon-pi/configuration.md
-typedef struct 
+typedef struct
 {                                                                      // RFM RF payload datastructure
   int temp;
   int temp_external[EXTERNAL_TEMP_SENSORS];
@@ -204,14 +203,12 @@ const byte SLAVE_ADDRESS = 42;
 
 static void showString (PGM_P s);
 
-//################################################################################################################################
-//################################################################################################################################
 #ifndef UNIT_TEST // IMPORTANT LINE! // http://docs.platformio.org/en/stable/plus/unit-testing.html
 
-void setup() 
-{
 //################################################################################################################################
-
+void setup()
+//################################################################################################################################
+{
   pinMode(LED,OUTPUT); digitalWrite(LED,HIGH);                         // Status LED on
 
   // Unused pins configure as input pull up for low power
@@ -236,24 +233,25 @@ void setup()
   delay(100);
 
   load_config(true);                                                   // Load RF config from EEPROM (if any exists)
-  
+
   if (EEProm.rf_on)
   {
     list_calibration();
-    
+
 #ifdef RFM69CW
     Serial.println("Init RFM...");
-    #if RadioFormat == RFM69_LOW_POWER_LABS
-      radio.initialize(EEProm.RF_freq,EEProm.nodeID,EEProm.networkGroup);  
-      #ifndef RFM69_LPL_AES_ENCRYPTION_KEY
-      radio.encrypt("89txbe4p8aik5kt3");                                                      // initialize RFM
-      #else
-      radio.encrypt(RFM69_LPL_AES_ENCRYPTION_KEY);                                            // initialize RFM
-      #endif
-      radio.setPowerLevel(EEProm.rfPower);
-    #else
-      rfm_init();                                                        // initialize RFM
-    #endif
+#if RadioFormat == RFM69_LOW_POWER_LABS
+    radio.initialize(EEProm.RF_freq,EEProm.nodeID,EEProm.networkGroup);
+#ifndef RFM69_LPL_AES_ENCRYPTION_KEY
+
+    radio.encrypt("89txbe4p8aik5kt3");                                 // initialize RFM
+#else
+    radio.encrypt(RFM69_LPL_AES_ENCRYPTION_KEY);                       // initialize RFM
+#endif
+    radio.setPowerLevel(EEProm.rfPower);
+#else
+    rfm_init();                                                        // initialize RFM
+#endif
 #endif
 
     Serial.println("RFM Started");
@@ -262,12 +260,12 @@ void setup()
     for (int i = 10; i> -1; i--)
     {
       emonth.temp=i;
-      #if RadioFormat == RFM69_LOW_POWER_LABS
-        // radio.send(5, (const void*)(&emonth), sizeof(emonth));
-        // radio.sleep();
-      #else
-        rfm_send((byte *)&emonth, sizeof(emonth), FACTORYTESTGROUP, nodeID, EEProm.RF_freq, EEProm.rfPower, busyThreshold, busyTimeout);
-      #endif
+#if RadioFormat == RFM69_LOW_POWER_LABS
+      // radio.send(5, (const void*)(&emonth), sizeof(emonth));
+      // radio.sleep();
+#else
+      rfm_send((byte *)&emonth, sizeof(emonth), FACTORYTESTGROUP, nodeID, EEProm.RF_freq, EEProm.rfPower, busyThreshold, busyTimeout);
+#endif
       delay(100);
     }
     emonth.temp = 0;
@@ -288,7 +286,7 @@ void setup()
   {
     SI7021_sensor.begin();
     int deviceid = SI7021_sensor.getDeviceId();
-    if (deviceid!=0) 
+    if (deviceid!=0)
     {
       SI7021_status=1;
       si7021_env data = SI7021_sensor.getHumidityAndTemperature();
@@ -297,7 +295,7 @@ void setup()
       Serial.print("SI7021 t: "); Serial.println(data.celsiusHundredths/100.0);
       Serial.print("SI7021 h: "); Serial.println(data.humidityBasisPoints/100.0);
     }
-    else 
+    else
     {
       SI7021_status=0;
       Serial.println("SI7021 Error");
@@ -311,13 +309,13 @@ void setup()
   //################################################################################################################################
   digitalWrite(DS18B20_PWR, HIGH); delay(50);
   sensors.begin();
-  sensors.setWaitForConversion(false);                                 // disable automatic temperature conversion to reduce time spent awake, 
-                                                                       // conversion will be implemented manually in sleeping 
+  sensors.setWaitForConversion(false);                                 // disable automatic temperature conversion to reduce time spent awake,
+                                                                       // conversion will be implemented manually in sleeping
                                                                        // http://harizanov.com/2013/07/optimizing-ds18b20-code-for-low-power-applications/
 
   if (EEProm.allAddresses[0][0] == 0x00)                               // No sensor addresses recorded in EEPROM
   {
-    numSensors = (sensors.getDeviceCount()); 
+    numSensors = (sensors.getDeviceCount());
     if (numSensors > MAX_SENSORS)
       numSensors = MAX_SENSORS;
   }
@@ -332,35 +330,30 @@ void setup()
   }
   byte j=0;                                                            // search for one wire devices and copy to device address array.
   if (EEProm.allAddresses[0][0] != 0x28)                               // 0x28 = signature of a DS18B20, so a pre-existing array - do not search for sensors
-    while ((j < numSensors) && (oneWire.search(EEProm.allAddresses[j]))) 
+    while ((j < numSensors) && (oneWire.search(EEProm.allAddresses[j])))
       j++;
 
   digitalWrite(DS18B20_PWR, LOW);
 
-  if (numSensors) 
+  if (numSensors)
   {
-    Serial.print(numSensors); 
+    Serial.print(numSensors);
     Serial.println(" DS18B20");
   }
   else
     Serial.println("No DS18B20");
   Serial.println("");
 
-
-
   //################################################################################################################################
   // Config mode
   //################################################################################################################################
-
   getSettings();
-  
+
   //################################################################################################################################
   // Interrupt pulse counting setup
   //################################################################################################################################
-
   startPulseCount();
-  
-  
+
   //################################################################################################################################
   // Power Save  - turn off what we don't need - http://www.nongnu.org/avr-libc/user-manual/group__avr__power.html
   //################################################################################################################################
@@ -379,24 +372,22 @@ void setup()
   }
 } // end of setup
 
-
-//################################################################################################################################
 //################################################################################################################################
 void loop()
 //################################################################################################################################
 {
   if (newPulse) {
-    #ifndef ATTINY
+#ifndef ATTINY
     Sleepy::loseSomeTime(EEProm.pulse_period);
-    #endif
+#endif
     newPulse = false;
   }
 
-  #ifndef ATTINY
+#ifndef ATTINY
   if (Sleepy::loseSomeTime(WDT_PERIOD)==1) {
     WDT_number++;
   }
-  #endif
+#endif
 
   if (WDT_number>=WDT_MAX_NUMBER || pulseCount>=PULSE_MAX_NUMBER)
   {
@@ -412,12 +403,13 @@ void loop()
     if (numSensors && EEProm.temperatureEnabled)
     {
       digitalWrite(DS18B20_PWR, HIGH); dodelay(50);
-      for(int j=0;j<numSensors;j++) 
+      for(int j=0;j<numSensors;j++)
         sensors.setResolution(EEProm.allAddresses[j], TEMPERATURE_PRECISION);      // and set the a to d conversion resolution of each.
       sensors.requestTemperatures();                                   // Send the command to get temperatures
       dodelay(ASYNC_DELAY);                                            //Must wait for conversion, since we use ASYNC mode
-      
-      for(int j=0;j<EXTERNAL_TEMP_SENSORS;j++) {
+
+      for(int j=0;j<EXTERNAL_TEMP_SENSORS;j++)
+      {
         float temp=(sensors.getTempC(EEProm.allAddresses[j]));
         if ((temp < 125.0) && (temp > -40.0)) {
           emonth.temp_external[j] = (temp*10);
@@ -442,35 +434,34 @@ void loop()
     // Read from SI7021 SPI temp & humidity sensor
     if (SI7021_status==1)
     {
-      #ifndef ATTINY
+#ifndef ATTINY
       power_twi_enable();
-      #endif
+#endif
       si7021_env data = SI7021_sensor.getHumidityAndTemperature();
       emonth.temp = (data.celsiusHundredths*0.1);
       emonth.humidity = (data.humidityBasisPoints*0.1);
-      #ifndef ATTINY
+#ifndef ATTINY
       power_twi_disable();
-      #endif
+#endif
     }
-
 
     // Send data via RF
     if (EEProm.rf_on & 0x01)
     {
-      #ifndef ATTINY
+#ifndef ATTINY
       power_spi_enable();
-      #endif
+#endif
       dodelay(30);                                                     // wait for module to wakup
-      #if RadioFormat == RFM69_LOW_POWER_LABS
-        radio.send(5, (const void*)(&emonth), sizeof(emonth));
-        radio.sleep();
-      #else
-        rfm_send((byte *)&emonth, sizeof(emonth), EEProm.networkGroup, nodeID, EEProm.RF_freq, EEProm.rfPower, busyThreshold, busyTimeout);
-      #endif
+#if RadioFormat == RFM69_LOW_POWER_LABS
+      radio.send(5, (const void*)(&emonth), sizeof(emonth));
+      radio.sleep();
+#else
+      rfm_send((byte *)&emonth, sizeof(emonth), EEProm.networkGroup, nodeID, EEProm.RF_freq, EEProm.rfPower, busyThreshold, busyTimeout);
+#endif
       dodelay(100);
-      #ifndef ATTINY
+#ifndef ATTINY
       power_spi_disable();
-      #endif
+#endif
     }
 
     if (flash_led)
@@ -480,7 +471,6 @@ void loop()
       digitalWrite(LED,LOW);
     }
 
-
     if (EEProm.rf_on & 0x02)
     {
       // Serial print strings pairs e.g. "temp:2634,humidity:4010,batt:33"
@@ -489,7 +479,8 @@ void loop()
 
       if (numSensors)
       {
-        for(int j=0;j<EXTERNAL_TEMP_SENSORS;j++) {
+        for(int j=0;j<EXTERNAL_TEMP_SENSORS;j++)
+        {
           Serial.print("tempex");Serial.print(j);Serial.print(":");Serial.print(emonth.temp_external[j]); Serial.print(",");
         }
       }
@@ -499,7 +490,7 @@ void loop()
         Serial.print("humidity:");Serial.print(emonth.humidity); Serial.print(",");
       }
       Serial.print("batt:"); Serial.print(emonth.battery);
-      if (emonth.pulsecount > 0) 
+      if (emonth.pulsecount > 0)
       {
         Serial.print(",");
         Serial.print("pulse:"); Serial.print(emonth.pulsecount);
@@ -517,7 +508,7 @@ void loop()
 
 void dodelay(unsigned int ms)
 {
-  #ifndef ATTINY
+#ifndef ATTINY
   byte oldADCSRA=ADCSRA;
   byte oldADCSRB=ADCSRB;
   byte oldADMUX=ADMUX;
@@ -527,12 +518,12 @@ void dodelay(unsigned int ms)
   ADCSRA=oldADCSRA;         // restore ADC state
   ADCSRB=oldADCSRB;
   ADMUX=oldADMUX;
-  #endif
+#endif
 }
 
-  //################################################################################################################################
-  // Interrupt pulse counting setup
-  //################################################################################################################################
+//################################################################################################################################
+// Interrupt pulse counting setup
+//################################################################################################################################
 void startPulseCount(void)
 {
   emonth.pulsecount = 0;
@@ -561,24 +552,24 @@ void printTemperatureSensorAddresses(void)
   Serial.print(numSensors);
   Serial.print(" of ");
   Serial.print(MAX_SENSORS);
-  
+
   if (numSensors)
   {
-      Serial.println(F(", with addresses..."));
-      for (int j=0; j< numSensors; j++)
+    Serial.println(F(", with addresses..."));
+    for (int j=0; j< numSensors; j++)
+    {
+      for (int i=0; i<8; i++)
       {
-          for (int i=0; i<8; i++)
-          {
-              if (temperatureSensors[j][i] < 0x10)
-                Serial.print(F("0"));
-              Serial.print(temperatureSensors[j][i], 16);
-              Serial.print(F(" "));
-          }
-          if (temperatureSensors[j][6] == 0x03)
-            Serial.print(F("Sensor may not be reliable"));
-          Serial.println();
-          delay(5);
+        if (temperatureSensors[j][i] < 0x10)
+          Serial.print(F("0"));
+        Serial.print(temperatureSensors[j][i], 16);
+        Serial.print(F(" "));
       }
+      if (temperatureSensors[j][6] == 0x03)
+        Serial.print(F("Sensor may not be reliable"));
+      Serial.println();
+      delay(5);
+    }
   }
   Serial.println();
   Serial.print(F("Temperature measurement is"));
@@ -586,9 +577,7 @@ void printTemperatureSensorAddresses(void)
   Serial.println(F(" enabled."));
   Serial.println();
   delay(5);
-        
 }
-
 
 #endif    // IMPORTANT LINE! end unit test
 //http://docs.platformio.org/en/stable/plus/unit-testing.html
